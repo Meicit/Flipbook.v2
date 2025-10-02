@@ -1,189 +1,48 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Flipbook - GitHub Pages</title>
-  <!--
-    How to use:
-    1. Put this file in your repository root as index.html.
-    2. Add the PDF you want to display as sample.pdf in the same folder (or rename in the script).
-    3. Commit and push to GitHub and enable GitHub Pages (branch: main / root).
-    4. Open https://<your-username>.github.io/<repo>/
-
-    Notes:
-    - This implementation uses PDF.js to render PDF pages into canvas elements and turn.js to create the page flip effect.
-    - If you prefer a different library (3D flipbook, Heyzine export, etc.) you can swap the JS/CSS includes and the initialization.
-  -->
-
+  <meta charset="UTF-8">
+  <title>Flipbook 3D</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- 3D FlipBook library -->
+  <script src="https://cdn.jsdelivr.net/npm/3d-flip-book/dist/js/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/3d-flip-book/dist/js/3dflipbook.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/3d-flip-book/dist/css/3dflipbook.min.css">
   <style>
-    html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial}
-    .wrap{max-width:1200px;margin:20px auto;padding:10px}
-    header{display:flex;align-items:center;gap:16px}
-    header h1{font-size:20px;margin:0}
-    #book{width:100%;height:800px;margin-top:12px}
-
-    /* turn.js requires the pages to be positioned -- simple styling below */
-    .page{width:49%;height:100%;box-shadow:0 4px 18px rgba(0,0,0,0.15);background:#fff;overflow:hidden}
-    .page canvas{width:100%;height:100%;display:block}
-
-    /* container used by turn.js */
-    .turn-wrapper{width:100%;height:800px}
-
-    /* small controls */
-    .controls{margin-top:8px;display:flex;gap:8px;align-items:center}
-    button,select{padding:8px 12px;border-radius:6px;border:1px solid #ddd;background:#f7f7f7;cursor:pointer}
+    body { margin: 0; height: 100vh; font-family: Arial, sans-serif; }
+    header { padding: 12px; background: #3498db; color: #fff; font-size: 18px; }
+    #flipbook { width: 100%; height: calc(100vh - 50px); }
   </style>
-
-  <!-- PDF.js (rendering engine) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
-  <!-- turn.js (page flip) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/turn.js/4/turn.min.js"></script>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='46' height='46'><rect rx='8' width='46' height='46' fill='%233498db'/><text x='50%25' y='54%25' font-size='20' fill='white' font-family='Arial' text-anchor='middle' dominant-baseline='central'>FB</text></svg>" alt="logo" style="width:46px;height:46px">
-      <h1>Flipbook (PDF → flip) — GitHub Pages</h1>
-    </header>
-
-    <div class="controls">
-      <label for="file">PDF (local):</label>
-      <input id="file" type="file" accept="application/pdf">
-      <button id="loadSample">Load sample.pdf</button>
-      <button id="prev">‹ Prev</button>
-      <button id="next">Next ›</button>
-      <span id="status"></span>
-    </div>
-
-    <div id="book" class="turn-wrapper"></div>
-  </div>
-
-<script>
-// Configuration
-const DEFAULT_PDF = 'sample.pdf'; // file placed next to index.html in the repo
-const PAGE_WIDTH = 800; // rendering width in px (canvas internal width, scaled to layout)
-
-const pdfjsLib = window['pdfjs-dist/build/pdf'];
-// If you host PDF.js yourself, set workerSrc accordingly. Using CDN bundled worker may work, but we'll set a fallback.
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.worker.min.js';
-
-const bookEl = document.getElementById('book');
-const statusEl = document.getElementById('status');
-const fileInput = document.getElementById('file');
-
-let pdfDoc = null;
-let pagesRendered = 0;
-
-function setStatus(msg){ statusEl.textContent = msg; }
-
-async function loadPdfFromFile(file){
-  const arrayBuffer = await file.arrayBuffer();
-  return pdfjsLib.getDocument({data: arrayBuffer}).promise;
-}
-
-async function loadPdfByUrl(url){
-  return pdfjsLib.getDocument(url).promise;
-}
-
-async function renderPdfToPages(pdf) {
-  // clear previous
-  bookEl.innerHTML = '';
-  pagesRendered = 0;
-
-  const total = pdf.numPages;
-  setStatus(`PDF has ${total} pages — rendering...`);
-
-  // turn.js expects child elements representing pages. We'll create a page wrapper for each side.
-  // For a book look: pages are single pages. turn.js will handle spreads.
-
-  for(let i=1;i<=total;i++){
-    const page = await pdf.getPage(i);
-    const viewport = page.getViewport({scale: 1});
-    const scale = PAGE_WIDTH / viewport.width;
-    const scaledViewport = page.getViewport({scale});
-
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = Math.round(scaledViewport.width);
-    canvas.height = Math.round(scaledViewport.height);
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-
-    await page.render({canvasContext: ctx, viewport: scaledViewport}).promise;
-
-    const pageDiv = document.createElement('div');
-    pageDiv.className = 'page';
-    pageDiv.appendChild(canvas);
-
-    // Put every page as a child of the book container
-    bookEl.appendChild(pageDiv);
-    pagesRendered++;
-    setStatus(`Rendered ${pagesRendered}/${total}`);
-  }
-
-  // initialize turn.js on the container
-  // turn.js requires the container to be a jQuery selection; the library attaches to the element
-  // but minimal usage works via $(element).turn({...}) — some builds of turn.js include a lightweight jQuery replacement.
-
-  // Wrap children with a paging container expected by turn.js
-  // Ensure bookEl has the right size
-  bookEl.style.height = '800px';
-
-  // initialize turn
-  if (typeof $(bookEl).turn === 'function') {
-    $(bookEl).turn({
-      width: bookEl.clientWidth,
-      height: 800,
-      autoCenter: true
+  <header>📖 Flipbook 3D — GitHub Pages</header>
+  <div id="flipbook"></div>
+  <script>
+    // Khởi tạo FlipBook
+    $('#flipbook').FlipBook({
+      pdf: 'sample.pdf', // đặt file PDF vào cùng thư mục
+      template: {
+        html: 'https://cdn.jsdelivr.net/npm/3d-flip-book/templates/default-book-view.html',
+        styles: [
+          'https://cdn.jsdelivr.net/npm/3d-flip-book/templates/default-book-view.css'
+        ],
+        script: 'https://cdn.jsdelivr.net/npm/3d-flip-book/templates/default-book-view.js'
+      },
+      propertiesCallback: function(props) {
+        props.page.depth = 5; // độ dày trang
+        props.cssLayersLoader = false;
+        return props;
+      },
+      controlsProps: {
+        downloadURL: 'sample.pdf', // thêm nút download
+        actions: {
+          cmdBackward: true,
+          cmdForward: true,
+          cmdSave: true,
+          cmdPrint: true
+        }
+      }
     });
-  } else {
-    // If turn.js couldn't initialize, fallback to a simple CSS grid display
-    bookEl.style.display = 'grid';
-    bookEl.style.gridTemplateColumns = 'repeat(2, 1fr)';
-    bookEl.style.gap = '12px';
-    setStatus('Rendered (turn.js not available in this environment)');
-  }
-}
-
-// Load default sample
-async function loadDefault(){
-  try{
-    setStatus('Loading ' + DEFAULT_PDF);
-    pdfDoc = await loadPdfByUrl(DEFAULT_PDF);
-    await renderPdfToPages(pdfDoc);
-  }catch(err){
-    console.error(err);
-    setStatus('Error loading default PDF. You can upload a PDF using the input above.');
-  }
-}
-
-// UI handlers
-fileInput.addEventListener('change', async (e)=>{
-  const file = e.target.files[0];
-  if(!file) return;
-  setStatus('Loading selected file...');
-  try{
-    pdfDoc = await loadPdfFromFile(file);
-    await renderPdfToPages(pdfDoc);
-  }catch(err){
-    console.error(err);
-    setStatus('Failed to load file: ' + err.message);
-  }
-});
-
-document.getElementById('loadSample').addEventListener('click', loadDefault);
-document.getElementById('prev').addEventListener('click', ()=>{
-  if(typeof $(bookEl).turn === 'function') $(bookEl).turn('previous');
-});
-document.getElementById('next').addEventListener('click', ()=>{
-  if(typeof $(bookEl).turn === 'function') $(bookEl).turn('next');
-});
-
-// Auto attempt to load sample.pdf on page open. If not present, user can upload.
-window.addEventListener('load', ()=>{
-  loadDefault();
-});
-</script>
+  </script>
 </body>
 </html>
