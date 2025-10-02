@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Flipbook PDF - GitHub Pages</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#0ea5a3}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial;color:#e6eef6;background:linear-gradient(180deg,#071032 0%, #081025 60%);}
+    .wrap{max-width:1100px;margin:28px auto;padding:18px}
+    header{display:flex;gap:12px;align-items:center;justify-content:space-between}
+    h1{font-size:20px;margin:0;color:var(--accent)}
+    .controls{display:flex;gap:8px;align-items:center}
+    .btn{background:transparent;border:1px solid rgba(255,255,255,0.08);color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer}
+    .btn:active{transform:translateY(1px)}
+    .viewer{margin-top:18px;background:radial-gradient(transparent, rgba(0,0,0,0.2)), #071022;padding:20px;border-radius:12px;display:flex;justify-content:center}
+    .book{width:100%;max-width:1000px;height:650px;position:relative;perspective:2000px}
+
+    /* container that holds visible pages */
+    .spine{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+    .page-slot{width:48%;height:100%;display:flex;align-items:center;justify-content:center;position:relative}
+    .page{width:92%;height:94%;box-shadow:0 10px 30px rgba(0,0,0,0.6);border-radius:8px;overflow:hidden;background:#fff;position:relative;backface-visibility:hidden;transform-style:preserve-3d}
+
+    /* flip overlay used for animation */
+    .flip-overlay{position:absolute;top:0;left:50%;transform-origin:left center;width:50%;height:100%;pointer-events:none}
+    .flip-card{position:absolute;top:0;left:0;width:100%;height:100%;backface-visibility:hidden;border-radius:8px;box-shadow:0 20px 40px rgba(0,0,0,0.5);overflow:hidden;background:#fff}
+    .flip-card.back{transform:rotateY(180deg)}
+    .flip-overlay.animate .flip-card.front{animation:flip-front 700ms ease-in-out forwards}
+    .flip-overlay.animate .flip-card.back{animation:flip-back 700ms ease-in-out forwards}
+
+    @keyframes flip-front{0%{transform:rotateY(0deg)}100%{transform:rotateY(-180deg)}}
+    @keyframes flip-back{0%{transform:rotateY(180deg)}100%{transform:rotateY(0deg)}}
+
+    /* responsive */
+    @media (max-width:900px){.book{height:520px}.page{height:90%}}
+    @media (max-width:600px){.spine{align-items:flex-start}.page-slot{width:100%;padding:0 8px}.page{width:100%}.flip-overlay{display:none}.controls{flex-wrap:wrap}}
+
+    /* small helper */
+    .info{font-size:13px;color:#bcd}
+    input[type=file]{display:none}
+    .file-label{cursor:pointer}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Flipbook PDF (chạy trên GitHub Pages)</h1>
+      <div class="controls">
+        <label class="file-label btn">
+          Chọn PDF
+          <input id="file" type="file" accept="application/pdf">
+        </label>
+        <button id="prev" class="btn">‹ Prev</button>
+        <button id="next" class="btn">Next ›</button>
+        <span class="info" id="pageInfo">—</span>
+      </div>
+    </header>
+
+    <div class="viewer">
+      <div class="book" id="book">
+        <div class="spine">
+          <div class="page-slot left">
+            <div class="page" id="leftPage"></div>
+          </div>
+          <div class="page-slot right">
+            <div class="page" id="rightPage"></div>
+          </div>
+          <!-- overlay used for flip animation (covering right half) -->
+          <div class="flip-overlay" id="flipOverlay" aria-hidden="true">
+            <div class="flip-card front" id="flipFront"></div>
+            <div class="flip-card back" id="flipBack"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="info" style="margin-top:12px">Gợi ý: đặt file PDF tên <strong>sample.pdf</strong> cùng thư mục với file này trên GitHub repo để chạy trực tiếp. Hoặc chọn file PDF bằng nút "Chọn PDF" để xem cục bộ.</p>
+  </div>
+
+  <!-- pdf.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script>
+    // Cấu hình worker (điền đường dẫn worker trên CDN)
+    if(window['pdfjsLib']){
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    } else {
+      alert('Không tải được pdf.js từ CDN. Kiểm tra kết nối.');
+    }
+
+    const leftPage = document.getElementById('leftPage');
+    const rightPage = document.getElementById('rightPage');
+    const flipOverlay = document.getElementById('flipOverlay');
+    const flipFront = document.getElementById('flipFront');
+    const flipBack = document.getElementById('flipBack');
+    const pageInfo = document.getElementById('pageInfo');
+
+    let pdfDoc = null;
+    let totalPages = 0;
+    let currentPage = 1; // we will display pages as (currentPage, currentPage+1)
+
+    // load from repo default (sample.pdf) if exists
+    const defaultUrl = 'sample.pdf';
+
+    async function loadPDF(url){
+      try{
+        pdfDoc = await pdfjsLib.getDocument(url).promise;
+        totalPages = pdfDoc.numPages;
+        currentPage = 1;
+        renderSpread();
+      }catch(e){
+        console.error(e);
+        pageInfo.textContent = 'Không thể mở PDF: '+ e.message;
+      }
+    }
+
+    function clearContainer(container){
+      while(container.firstChild) container.removeChild(container.firstChild);
+    }
+
+    async function renderPage(pageNum, container){
+      clearContainer(container);
+      if(!pdfDoc) return;
+      if(pageNum<1 || pageNum>totalPages) return;
+      const page = await pdfDoc.getPage(pageNum);
+      // scale to fit page-slot
+      const viewport = page.getViewport({scale:1});
+      // compute scale to fit width of container
+      const slotWidth = container.clientWidth - 8; // padding
+      const scale = (slotWidth / viewport.width) * 1.0; // tune if needed
+      const scaledViewport = page.getViewport({scale});
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(scaledViewport.width);
+      canvas.height = Math.round(scaledViewport.height);
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+      const ctx = canvas.getContext('2d');
+      const renderCtx = {canvasContext: ctx, viewport: scaledViewport};
+      await page.render(renderCtx).promise;
+      container.appendChild(canvas);
+    }
+
+    async function renderSpread(){
+      pageInfo.textContent = `Trang ${currentPage} - ${Math.min(currentPage+1,totalPages)} / ${totalPages}`;
+      await renderPage(currentPage, leftPage);
+      await renderPage(currentPage+1, rightPage);
+    }
+
+    // simple flip animation: create front/back copies then animate overlay
+    async function flipToNext(){
+      if(!pdfDoc) return;
+      if(currentPage+2 > totalPages) return; // no more spreads
+      // render front/back canvases into overlay
+      // front = current right page (currentPage+1), back = incoming next right (currentPage+3)
+      // but for simplicity we'll show left=currentPage+2 right=currentPage+3 after flip
+      // create snap of rightPage as front
+      flipOverlay.classList.remove('animate');
+      clearContainer(flipFront);
+      clearContainer(flipBack);
+      // duplicate current right page canvas (if exists)
+      const oldRight = rightPage.querySelector('canvas');
+      if(oldRight){
+        flipFront.appendChild(oldRight.cloneNode(true));
+      }
+      // render incoming right page into back
+      const incomingRightIndex = currentPage + 3;
+      if(incomingRightIndex <= totalPages){
+        // render page into back overlay (we create a canvas by rendering the pdf page scaled to overlay width)
+        const page = await pdfDoc.getPage(incomingRightIndex);
+        const viewport = page.getViewport({scale:1});
+        const overlayWidth = flipBack.clientWidth - 8;
+        const scale = overlayWidth / viewport.width;
+        const vp = page.getViewport({scale});
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(vp.width);
+        canvas.height = Math.round(vp.height);
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        await page.render({canvasContext: canvas.getContext('2d'), viewport: vp}).promise;
+        flipBack.appendChild(canvas);
+      }
+
+      // animate
+      flipOverlay.classList.add('animate');
+      // when animation ends, advance pages and re-render spread
+      setTimeout(()=>{
+        currentPage += 2;
+        renderSpread();
+        flipOverlay.classList.remove('animate');
+      },720);
+    }
+
+    async function flipToPrev(){
+      if(!pdfDoc) return;
+      if(currentPage - 2 < 1) return;
+      flipOverlay.classList.remove('animate');
+      clearContainer(flipFront);
+      clearContainer(flipBack);
+      // show left page as front (mirror) and previous left as back
+      const oldLeft = leftPage.querySelector('canvas');
+      if(oldLeft) flipFront.appendChild(oldLeft.cloneNode(true));
+      const incomingLeftIndex = currentPage - 2;
+      if(incomingLeftIndex >= 1){
+        const page = await pdfDoc.getPage(incomingLeftIndex);
+        const viewport = page.getViewport({scale:1});
+        const overlayWidth = flipBack.clientWidth - 8;
+        const scale = overlayWidth / viewport.width;
+        const vp = page.getViewport({scale});
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(vp.width);
+        canvas.height = Math.round(vp.height);
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        await page.render({canvasContext: canvas.getContext('2d'), viewport: vp}).promise;
+        flipBack.appendChild(canvas);
+      }
+      // reverse animation by adding animate and using CSS same keyframes (works visually)
+      flipOverlay.classList.add('animate');
+      setTimeout(()=>{
+        currentPage -= 2;
+        renderSpread();
+        flipOverlay.classList.remove('animate');
+      },720);
+    }
+
+    // UI hooks
+    document.getElementById('next').addEventListener('click', ()=>{
+      // if at end but one page left, just advance without animation
+      if(currentPage+2 > totalPages){
+        if(currentPage+1 <= totalPages){ currentPage += 2; renderSpread(); }
+        return;
+      }
+      flipToNext();
+    });
+    document.getElementById('prev').addEventListener('click', ()=>{
+      if(currentPage-2 < 1){
+        if(currentPage>1){ currentPage = Math.max(1,currentPage-2); renderSpread(); }
+        return;
+      }
+      flipToPrev();
+    });
+
+    // keyboard
+    document.addEventListener('keydown',(e)=>{
+      if(e.key === 'ArrowRight') document.getElementById('next').click();
+      if(e.key === 'ArrowLeft') document.getElementById('prev').click();
+    });
+
+    // file input
+    document.getElementById('file').addEventListener('change', (ev)=>{
+      const f = ev.target.files[0];
+      if(!f) return; 
+      const url = URL.createObjectURL(f);
+      loadPDF(url);
+    });
+
+    // try default (sample.pdf) on load
+    window.addEventListener('load', ()=>{
+      // try to fetch sample.pdf silently
+      fetch(defaultUrl, {method:'HEAD'}).then(r=>{
+        if(r.ok) loadPDF(defaultUrl);
+      }).catch(()=>{
+        pageInfo.textContent = 'Chọn PDF hoặc đặt sample.pdf trong cùng thư mục.';
+      });
+    });
+
+    // handle resize -> re-render current spread to fit
+    window.addEventListener('resize', ()=>{
+      if(pdfDoc) renderSpread();
+    });
+  </script>
+</body>
+</html>
